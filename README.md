@@ -1,1 +1,154 @@
 # ELK-Installation-Steps
+Assume We have cretaed 2 servers (Ubuntu 18.04)
+1. ELK-Server (Master) - t2.medium
+2. FileBeat-Server(Client) - t2.micro
+
+# ELK Stack Installation
+Login to ELK Server
+Add Elasticsearch Repository and apt-key
+
+wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | sudo apt-key add -
+sudo apt install apt-transport-https
+
+Add Package and create new file
+echo "deb https://artifacts.elastic.co/packages/7.x/apt stable main" | sudo tee /etc/apt/sources.list.d/elastic-7.x.list
+
+sudo apt update -> To Update the Elastic Search
+
+# 1. Install Elasticsearch 
+Java is already present in elasticsearch so no need to install seperately.
+sudo apt install elasticsearch
+edit Xmx and Xms /etc/elasticsearch/jvm.options
+modify JVM Heap size and save it.
+uncomment #-Xms4g modify to -Xms1g
+	        #-Xmx4g modify to -Xms1g  
+
+sudo systemctl status elasticsearch
+sudo systemctl start elasticsearch
+sudo systemctl enable elasticsearch
+
+To check (version:7.17.4) and elasticsearch running on port:9200 
+curl 127.0.0.1:9200
+(version:7.17.4)
+
+# 2. Install Kibana
+sudo apt install kibana
+sudo vim /etc/kibana/kibana.yml
+
+change server.host to "0.0.0.0" or "external ip"
+uncomment #server.host: "localhost"  and modify to server.host: "0.0.0.0"
+The default is 'localhost' which usually means remote users will not able to connect and to allow remote users change this parameter.
+
+sudo systemctl status kibana
+sudo systemctl start kibana
+sudo systemctl enable kibana
+
+sudo netstat -ntaup | 5601
+ip a
+Login to kibana web using ip and port ip:5601 
+Now we wil be able to access kibana.
+
+# 3. Logstash Install
+sudo apt install logstash
+sudo systemctl status logstash
+sudo systemctl start logstash
+sudo systemctl enable logstash
+
+# 4. Installation of filebeat in Client Server (Another Server)
+
+wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | sudo apt-key add -
+sudo apt install apt-transport-https
+echo "deb https://artifacts.elastic.co/packages/7.x/apt stable main" | sudo tee /etc/apt/sources.list.d/elastic-7.x.list
+sudo apt update
+sudo apt install filebeat
+
+change listen IP and uncomment seed_discovery on elasticsearch (ELK-Server)
+sudo vim /etc/elasticsearch/elasticsearch.yml
+
+modify network.host: localhost to network.host: 0.0.0.0
+network.host: 0.0.0.0
+discovery.seed_hosts: ["127.0.0.1"]
+
+sudo systemctl restart elasticsearch
+
+In Filebeat server
+set the elasticsearch IP in sudo vim /etc/filebeat/filebeat.yml
+output.elasticsearch:
+  hosts: ["ELK-server-IP:9200"]
+sudo systemctl restart filebeat
+
+# 5. Install nginx in Filebeat Server:
+sudo apt install nginx
+activate the nginx module
+sudo filebeat modules list
+ls /etc/filebeat/modules.d/
+sudo filebeat modules enable nginx
+sudo systemctl restart filebeat
+
+# Purposes :
+	* classic way : filebeat > logstash > elasticsearch
+	* change the logstash configuration 
+	* change the filebeat configuration 
+	* create logs
+	* check the elasticsearch index in kibana
+  
+ # 6.FILEBEAT & LOGSTASH : Simple example
+
+change the filebeat configuration
+sudo vim /etc/logstash/conf.d/nginx
+replace only input and index name.
+
+input {
+  beats {
+    port => 5044
+  }
+}
+filter {
+    grok {
+      patterns_dir => ["/etc/logstash/pattern"]
+      match => { "message" => "%{IPORHOST:clientip} %{NGUSER:ident} %{NGUSER:auth} \[%{HTTPDATE:timestamp}\] \"%{WORD:verb} %{URIPATHPARAM:request} HTTP/%{NUMBER:httpversion}\" %{NUMBER:response}" }
+    }
+}
+output {
+  elasticsearch {
+      hosts => ["127.0.0.1:9200"]
+      index => "elk_fb_logstash-%{+YYYY.MM.dd}"
+  }
+}
+
+Note : change the output index name
+
+change the logstash configuration
+sudo systemctl restart logstash
+sudo tail /var/log/logstash/logstash-plain.log
+
+In Filebeat server 
+sudo /etc/filebeat/filebeat.yml
+comment output.elasticsearch:
+and uncomment 
+output.logstash:
+  hosts: ["192.168.16.41(ELK_Server_IP):5044"]
+
+Note : keep the nginx module enabled
+sudo systemctl restart filebeat
+
+================================================
+Disable the nginx module
+sudo filebeat modules disable nginx
+and add a path where filebeat finds logs
+filebeat.inputs:
+- type: log
+  enabled: true
+  paths:
+    - /var/log/nginx/access.log
+sudo systemctl restart filebeat
+
+# 7. Access Kibana through web
+In the Management section, click on stack management 
+select index management and reload the indices.
+
+Under Kibana click on Index pattern 
+Create index pattern and save.
+
+IN the analytics section select Discover 
+select index pattern that we created earlier and we can see the logs.
